@@ -20,5 +20,12 @@ Thumbs.db
 *.env.local
 start_server.bat
 
+# 密钥/凭据（严禁提交到公开仓库）
+*.pem
+*.key
+*.p12
+*.pfx
+cloudflared.exe
+
 # Shared trips data
 backend/shared_trips/

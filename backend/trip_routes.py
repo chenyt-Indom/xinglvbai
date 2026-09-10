@@ -1,7 +1,9 @@
 """行程生成与重新生成接口路由"""
 import json
+import time
 import httpx
 import asyncio
+from collections import defaultdict, deque
 from fastapi import APIRouter, Request
 from models import TripRequest
 from config import AMAP_KEY
@@ -19,11 +21,33 @@ from transport_validation import (
 
 router = APIRouter()
 
+# ============ 每IP限流（生成行程会消耗DeepSeek费用，防止被他人/爬虫刷爆） ============
+_RATE_WINDOW = 3600  # 1小时窗口
+_RATE_LIMIT = 5      # 每IP每小时最多5次
+_rate_hits = defaultdict(deque)  # ip -> deque[timestamp]
+
+
+def _check_rate_limit(ip: str) -> str:
+    """返回空串=放行；否则返回错误提示"""
+    now = time.time()
+    q = _rate_hits[ip]
+    while q and q[0] < now - _RATE_WINDOW:
+        q.popleft()
+    if len(q) >= _RATE_LIMIT:
+        return f"操作过于频繁，请{_RATE_WINDOW // 60}分钟后再试（每IP每小时最多生成{_RATE_LIMIT}次）"
+    q.append(now)
+    return ""
+
 
 @router.post("/api/generate-trip")
-async def generate_trip(req: TripRequest):
+async def generate_trip(req: TripRequest, request: Request):
     """生成旅行攻略：高德POI+天气 → DeepSeek itinerary → DeepSeek booking → 返回完整JSON"""
     try:
+        # 每IP限流：防止公开站点被刷爆DeepSeek费用
+        rate_err = _check_rate_limit(request.client.host if request.client else "")
+        if rate_err:
+            return {"success": False, "error": rate_err}
+
         dest = req.destination.strip()
         days = max(1, min(31, req.days))
         start_date = req.start_date or ""
@@ -177,6 +201,9 @@ async def generate_trip(req: TripRequest):
             elif e.response.status_code == 429:
                 err_msg = "请求过于频繁，请稍后重试"
             return {"success": False, "error": err_msg}
+        except RuntimeError as e:
+            # 每日预算保护等自定义错误，向用户透出真实原因
+            return {"success": False, "error": str(e)}
         except Exception:
             return {"success": False, "error": "AI服务调用失败，请重试"}
 
@@ -186,9 +213,9 @@ async def generate_trip(req: TripRequest):
         except Exception:
             return {"success": False, "error": "AI返回数据格式异常，请重试"}
 
-        # 后处理验证与重生成：飞常准API严格校验班次真实性，不准确则重新生成（最多3次）
+        # 后处理验证与重生成：飞常准API严格校验班次真实性，不准确则重新生成（最多1次，控制DeepSeek费用）
         validation_result = {"valid": True, "issues": [], "fabricated": []}
-        max_retries = 3
+        max_retries = 1
         for retry_attempt in range(max_retries + 1):
             try:
                 # 将用户选择的出行方式注入trip_data，供验证函数使用
@@ -294,6 +321,11 @@ async def generate_trip(req: TripRequest):
 async def regenerate_trip(request: Request):
     """根据用户新需求重新生成旅行计划，重点参考用户输入"""
     try:
+        # 每IP限流：防止公开站点被刷爆DeepSeek费用
+        rate_err = _check_rate_limit(request.client.host if request.client else "")
+        if rate_err:
+            return {"success": False, "error": rate_err}
+
         body = await request.json()
         user_input = body.get("user_input", "").strip()
         trip_data = body.get("trip_data", {})
@@ -452,6 +484,9 @@ async def regenerate_trip(request: Request):
             elif e.response.status_code == 429:
                 err_msg = "请求过于频繁，请稍后重试"
             return {"success": False, "error": err_msg}
+        except RuntimeError as e:
+            # 每日预算保护等自定义错误，向用户透出真实原因
+            return {"success": False, "error": str(e)}
         except Exception:
             return {"success": False, "error": "AI服务调用失败，请重试"}
 
@@ -462,9 +497,9 @@ async def regenerate_trip(request: Request):
         except Exception:
             return {"success": False, "error": "AI返回数据格式异常，请重试"}
 
-        # 后处理验证与重生成：飞常准API严格校验班次真实性，不准确则重新生成（最多3次）
+        # 后处理验证与重生成：飞常准API严格校验班次真实性，不准确则重新生成（最多1次，控制DeepSeek费用）
         validation_result = {"valid": True, "issues": [], "fabricated": []}
-        max_retries = 3
+        max_retries = 1
         for retry_attempt in range(max_retries + 1):
             try:
                 # 将用户选择的出行方式注入trip_data，供验证函数使用

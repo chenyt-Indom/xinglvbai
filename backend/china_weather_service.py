@@ -89,6 +89,12 @@ async def get_weather_chat(city: str, query: str = "") -> dict:
 用户：{query or f'请根据{city}天气给出行建议'}
 请提供穿衣、出行、健康方面建议，语言亲切自然，200字以内。"""
     try:
+        # 每日费用保护：与行程生成共用同一预算，防止被刷
+        from deepseek_service import check_deepseek_budget, record_deepseek_usage
+        budget_err = check_deepseek_budget()
+        if budget_err:
+            result["reply"] = budget_err
+            return result
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(DEEPSEEK_URL, json={
                 "model": "deepseek-chat",
@@ -98,6 +104,8 @@ async def get_weather_chat(city: str, query: str = "") -> dict:
             }, headers={"Authorization": f"Bearer {DEEPSEEK_KEY}", "Content-Type": "application/json"})
             data = resp.json()
             result["reply"] = data["choices"][0]["message"]["content"].strip()
+            usage = data.get("usage", {})
+            record_deepseek_usage(int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)))
     except Exception:
         result["reply"] = f"当前{city}天气数据获取中，请稍后再试。出行请注意查看实时天气，合理安排行程。"
     result["weather_context"] = ctx

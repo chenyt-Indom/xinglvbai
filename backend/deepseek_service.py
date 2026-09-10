@@ -1,12 +1,68 @@
 """DeepSeek AI 服务：API调用和提示词构建"""
 import asyncio
+import json
+import os
+import time
 import httpx
-from config import DEEPSEEK_KEY, DEEPSEEK_URL
+from config import DEEPSEEK_KEY, DEEPSEEK_URL, DEEPSEEK_DAILY_BUDGET
+
+# ============ 每日费用保护（防止无人使用时被刷接口导致费用失控） ============
+_USAGE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".deepseek_usage.json")
+# 按峰值价格保守估算（元/百万tokens）：输入未命中3元、输出9元，宁可早停也不超支
+_INPUT_PRICE, _OUTPUT_PRICE = 3.0, 9.0
+
+
+def _load_daily_usage() -> dict:
+    try:
+        with open(_USAGE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("date") == time.strftime("%Y-%m-%d"):
+            return data
+    except Exception:
+        pass
+    return {"date": time.strftime("%Y-%m-%d"), "cost": 0.0, "calls": 0, "tokens_in": 0, "tokens_out": 0}
+
+
+def _save_daily_usage(data: dict) -> None:
+    try:
+        with open(_USAGE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def check_deepseek_budget() -> str:
+    """检查今日费用是否超限；未超限返回空串，超限返回错误提示"""
+    usage = _load_daily_usage()
+    if usage["cost"] >= DEEPSEEK_DAILY_BUDGET:
+        return (f"DeepSeek今日预算已用完（¥{usage['cost']:.2f}，上限¥{DEEPSEEK_DAILY_BUDGET:.2f}），"
+                f"请明天再试或调高DEEPSEEK_DAILY_BUDGET")
+    return ""
+
+
+def record_deepseek_usage(prompt_tokens: int, completion_tokens: int) -> None:
+    """按usage记录当日费用（估算值），并持久化到本地文件"""
+    usage = _load_daily_usage()
+    est = prompt_tokens / 1_000_000 * _INPUT_PRICE + completion_tokens / 1_000_000 * _OUTPUT_PRICE
+    usage["cost"] += est
+    usage["calls"] += 1
+    usage["tokens_in"] += prompt_tokens
+    usage["tokens_out"] += completion_tokens
+    _save_daily_usage(usage)
+    print(f"[DEEPSEEK] 本次消耗 tokens(in={prompt_tokens}, out={completion_tokens}) 估算+¥{est:.4f} | "
+          f"今日累计 ¥{usage['cost']:.2f}/{DEEPSEEK_DAILY_BUDGET:.2f} 共{usage['calls']}次")
 
 
 async def call_deepseek(system_prompt: str, user_prompt: str, max_tokens: int = 4000) -> str:
-    """调用 DeepSeek API，返回生成的文本内容（超时10分钟，自动重试3次）"""
+    """调用 DeepSeek API，返回生成的文本内容（带每日费用上限保护，超时不重试避免重复扣费）"""
+    # 每日预算保护：超限直接拒绝，不发起请求
+    budget_err = check_deepseek_budget()
+    if budget_err:
+        raise RuntimeError(budget_err)
+
     last_error = None
+    # 说明：超时后DeepSeek服务端可能已生成完成并按量计费，此时重试会造成同一内容重复扣费，
+    # 因此超时不再重试（连接类错误不影响计费，仍重试3次）
     for attempt in range(3):
         try:
             async with httpx.AsyncClient(timeout=600.0) as client:
@@ -27,17 +83,29 @@ async def call_deepseek(system_prompt: str, user_prompt: str, max_tokens: int = 
                 )
                 resp.raise_for_status()
                 data = resp.json()
-            return data["choices"][0]["message"]["content"]
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
-            # 网络超时或连接错误：重试
+            content = data["choices"][0]["message"]["content"]
+            # 记录本次费用（DeepSeek返回的usage为实际计费token数）
+            usage = data.get("usage", {})
+            record_deepseek_usage(int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)))
+            return content
+        except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+            # 网络连接错误（请求未送达，不会计费）：重试
             last_error = e
             if attempt < 2:
                 wait_s = (attempt + 1) * 3  # 3s, 6s 递增等待
                 print(f"[DEEPSEEK] 第{attempt+1}次调用失败({type(e).__name__})，{wait_s}秒后重试...")
                 await asyncio.sleep(wait_s)
+        except httpx.TimeoutException as e:
+            # 超时：服务端可能已生成并计费，重试=重复扣费，直接抛出
+            raise e
         except httpx.HTTPStatusError as e:
-            # HTTP错误：4xx不重试，5xx重试
-            if e.response.status_code >= 500 and attempt < 2:
+            if e.response.status_code == 429 and attempt < 2:
+                # 限流：不产生费用，按1/3/9秒递增等待后重试
+                last_error = e
+                wait_s = 3 ** (attempt + 1)
+                print(f"[DEEPSEEK] 请求过于频繁(429)，{wait_s}秒后重试...")
+                await asyncio.sleep(wait_s)
+            elif e.response.status_code >= 500 and attempt < 2:
                 last_error = e
                 wait_s = (attempt + 1) * 3
                 print(f"[DEEPSEEK] 第{attempt+1}次调用失败(HTTP {e.response.status_code})，{wait_s}秒后重试...")
