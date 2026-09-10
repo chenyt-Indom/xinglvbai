@@ -49,9 +49,9 @@ if os.path.exists(env_path):
 else:
     print('  警告：未找到本地 deploy/.env 文件，跳过')
 
-# 3. 安装依赖（已安装的会快速跳过）
+# 3. 安装依赖（已安装的会快速跳过；--break-system-packages 兼容 Ubuntu 23.04+ 的 PEP668 限制）
 print('3. 安装 Python 依赖...')
-run(c, 'cd /opt/lvbai && sudo pip3 install -r backend/requirements.txt 2>&1', 5)
+run(c, 'cd /opt/lvbai && sudo pip3 install --break-system-packages -r backend/requirements.txt 2>&1', 5)
 
 # 4. 复制 service 并启动
 print('4. 配置并启动服务...')
