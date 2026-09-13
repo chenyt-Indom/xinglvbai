@@ -1411,8 +1411,8 @@ function renderOverview(data){
   });
   document.getElementById('spotSummary').textContent = `共 ${allMarkers.length} 个地点已标注（含酒店、需预约景点）`;
 
-  // 初始化高德地图
-  initOverviewMap(allMarkers);
+  // 初始化高德地图（延迟100ms，等容器布局完成有尺寸后再渲染，否则地图影像空白）
+  setTimeout(() => initOverviewMap(allMarkers), 100);
   window.scrollTo(0,0);
 }
 
