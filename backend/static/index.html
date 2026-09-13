@@ -725,8 +725,7 @@ if (!Object.keys) {
 // 全局错误捕获（必须在IIFE之前注册，防止IIFE内部错误导致白屏）
 window.addEventListener('error', function(e) {
   console.warn('全局JS错误:', e.message, e.filename, e.lineno);
-  var homePage = document.getElementById('homePage');
-  if (homePage) { homePage.style.display = 'block'; }
+  // 只负责隐藏加载占位；不要强制显示首页，否则进入计划页后延迟报错会把首页重新拉出来
   var initLoading = document.getElementById('pageInitLoading');
   if (initLoading) { initLoading.style.display = 'none'; }
 });
@@ -735,18 +734,15 @@ window.addEventListener('unhandledrejection', function(e) {
 });
 
 // 兜底超时：5秒后无论JS是否执行完毕，都隐藏加载占位，防止手机浏览器白屏
+// 注意：不能强制显示首页——如果此时已在计划页，会把首页重新拉出来
 setTimeout(function() {
   var initLoading = document.getElementById('pageInitLoading');
   if (initLoading) { initLoading.style.display = 'none'; }
-  var homePage = document.getElementById('homePage');
-  if (homePage) { homePage.style.display = 'block'; }
 }, 5000);
 // 兜底：window.onerror 捕获语法错误后也隐藏加载占位（兼容旧浏览器）
 window.onerror = function(msg, url, line) {
   var initLoading = document.getElementById('pageInitLoading');
   if (initLoading) { initLoading.style.display = 'none'; }
-  var homePage = document.getElementById('homePage');
-  if (homePage) { homePage.style.display = 'block'; }
   return false;
 };
 </script>
