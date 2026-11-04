@@ -6,6 +6,35 @@ import time
 import httpx
 from config import DEEPSEEK_KEY, DEEPSEEK_URL, DEEPSEEK_DAILY_BUDGET
 
+def _pick_spread(items: list, n: int = 30, time_key: str = "dep") -> list:
+    """按发车/起飞时间均匀采样，确保早中晚班次都被覆盖。
+
+    背景：飞常准返回的车次按时间排序，直接取前 N 条会集中在最早时段，
+    导致用户要求"改到下午/晚上"时，AI 的候选池里根本没有相应班次，
+    只能编造 → 被飞常准校验拦截 → 替换回原班次（表现为"AI 没按要求改"）。
+    """
+    if not items:
+        return []
+    if len(items) <= n:
+        return items
+
+    def _tval(x) -> int:
+        t = str(x.get(time_key, "") or "")
+        try:
+            h, m = t.split(":")[:2]
+            return int(h) * 60 + int(m)
+        except Exception:
+            return 0
+
+    ordered = sorted(items, key=_tval)
+    step = len(ordered) / n
+    picked = []
+    for i in range(n):
+        idx = min(int(i * step), len(ordered) - 1)
+        picked.append(ordered[idx])
+    return picked
+
+
 # ============ 每日费用保护（防止无人使用时被刷接口导致费用失控） ============
 _USAGE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".deepseek_usage.json")
 # 按峰值价格保守估算（元/百万tokens）：输入未命中3元、输出9元，宁可早停也不超支
@@ -274,7 +303,7 @@ def build_trip_prompt(dest: str, days: int, budget: str, interests: list,
                         transport_section += "\n以下班次为飞常准API实时查询结果，是当前日期唯一真实可购的班次。之前的静态数据全部作废，只使用以下数据！"
                         if vf_flights:
                             transport_section += "\n🚀 实时航班（飞常准API验证，真实可购）："
-                            for f in vf_flights[:10]:
+                            for f in _pick_spread(vf_flights, 15):
                                 airport_info = ""
                                 if f.get('from_airport') and f.get('to_airport'):
                                     airport_info = f"  [{f.get('from_airport','')} → {f.get('to_airport','')}]"
@@ -282,7 +311,7 @@ def build_trip_prompt(dest: str, days: int, budget: str, interests: list,
                                 transport_section += f"\n  ✈ {f['num']}：{f.get('dep','')}→{f.get('arr','')}（{f.get('duration','')}）{airport_info}{price_info}"
                         if vf_trains:
                             transport_section += "\n🚄 实时火车票（飞常准API验证，真实可购）："
-                            for t in vf_trains[:10]:
+                            for t in _pick_spread(vf_trains, 30):
                                 station_info = ""
                                 if t.get('from_station') and t.get('to_station'):
                                     station_info = f"  [{t.get('from_station','')} → {t.get('to_station','')}]"
@@ -551,7 +580,7 @@ def build_retry_prompt(original_prompt: str, validation_result: dict, transport_
             real_schedule_text = "\n【🔴 飞常准API唯一真实班次 - 这是唯一可用的数据源！】"
             if vf_flights:
                 real_schedule_text += "\n真实航班（飞常准API实时查询，唯一可用）："
-                for f in vf_flights[:10]:
+                for f in _pick_spread(vf_flights, 15):
                     airport_info = ""
                     if f.get('from_airport') and f.get('to_airport'):
                         airport_info = f"  [{f.get('from_airport','')} → {f.get('to_airport','')}]"
@@ -559,7 +588,7 @@ def build_retry_prompt(original_prompt: str, validation_result: dict, transport_
                     real_schedule_text += f"\n  ✈ {f['num']}：{f.get('dep','')}→{f.get('arr','')}（{f.get('duration','')}）{airport_info}{price_info}"
             if vf_trains:
                 real_schedule_text += "\n真实火车/高铁（飞常准API实时查询，唯一可用）："
-                for t in vf_trains[:10]:
+                for t in _pick_spread(vf_trains, 30):
                     station_info = ""
                     if t.get('from_station') and t.get('to_station'):
                         station_info = f"  [{t.get('from_station','')} → {t.get('to_station','')}]"
@@ -887,14 +916,14 @@ def build_regenerate_prompt(dest: str, days: int, user_input: str, old_itinerary
                     transport_section += "\n以下班次为飞常准API实时查询结果，静态数据全部作废，只使用以下数据！"
                     if vf_flights:
                         transport_section += "\n🚀 实时航班（飞常准API验证，真实可购）："
-                        for f in vf_flights[:10]:
+                        for f in _pick_spread(vf_flights, 15):
                             airport_info = ""
                             if f.get('from_airport') and f.get('to_airport'):
                                 airport_info = f"  [{f.get('from_airport','')} → {f.get('to_airport','')}]"
                             transport_section += f"\n  ✈ {f['num']}：{f.get('dep','')}→{f.get('arr','')}（{f.get('duration','')}）{airport_info}"
                     if vf_trains:
                         transport_section += "\n🚄 实时火车票（飞常准API验证，真实可购）："
-                        for t in vf_trains[:10]:
+                        for t in _pick_spread(vf_trains, 30):
                             station_info = ""
                             if t.get('from_station') and t.get('to_station'):
                                 station_info = f"  [{t.get('from_station','')} → {t.get('to_station','')}]"
