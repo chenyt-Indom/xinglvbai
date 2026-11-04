@@ -2832,7 +2832,13 @@ async function checkRainSnowAlert() {
 async function regeneratePlan() {
   const newPlan = document.getElementById('newPlanInput').value.trim();
   if (!newPlan) { alert('请输入新计划需求'); return; }
-  if (!tripData) return;
+  if (!tripData) { alert('请先生成一份行程'); return; }
+  // 数据完整性校验：残缺的 trip_data 会让 AI 只生成很小的结果（表现为"什么都没改"）
+  if (!Array.isArray(tripData.itinerary) || tripData.itinerary.length === 0 ||
+      !tripData.departure_transport || !tripData.return_transport) {
+    alert('当前行程数据不完整（可能是旧的历史记录），请返回首页重新生成一次后再试');
+    return;
+  }
 
   // 显示加载卡片
   document.getElementById('regenerateLoadingOverlay').classList.add('show');
