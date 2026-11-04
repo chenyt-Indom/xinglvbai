@@ -60,8 +60,11 @@ async def _call_variflight(endpoint: str, params: dict) -> dict:
                 )
                 if resp.status_code == 401:
                     return {"success": False, "error": "飞常准API Key无效", "data": []}
-                # 可重试的错误码
-                if resp.status_code in (403, 429, 502, 503):
+                # 403 多为余额不足/无数据权限，重试无意义且会把整个请求拖到几分钟，直接返回
+                if resp.status_code == 403:
+                    return {"success": False, "error": "飞常准API余额不足或无数据权限", "data": []}
+                # 可重试的错误码（限流/网关抖动）
+                if resp.status_code in (429, 502, 503):
                     last_error = f"飞常准API HTTP错误: {resp.status_code}"
                     if attempt < max_retries - 1:
                         wait_time = (attempt + 1) * 2
@@ -276,7 +279,7 @@ async def _calibrate_nearby_train_search(dep_city: str, arr_city: str, date: str
 
     # 策略1：尝试邻近出发城市 → 原到达城市（最多尝试3个邻近城市）
     if dep_nearby:
-        for alt_dep in dep_nearby[:3]:
+        for alt_dep in dep_nearby[:1]:
             print(f"[CALIBRATE-TRAIN] 策略1：尝试邻近出发 {alt_dep} → {arr_city}")
             result = await search_train_tickets(alt_dep, arr_city, date)
             alt_trains = result.get("trains", [])
@@ -291,7 +294,7 @@ async def _calibrate_nearby_train_search(dep_city: str, arr_city: str, date: str
 
     # 策略2：尝试原出发城市 → 邻近到达城市
     if not all_trains and arr_nearby:
-        for alt_arr in arr_nearby[:3]:
+        for alt_arr in arr_nearby[:1]:
             print(f"[CALIBRATE-TRAIN] 策略2：尝试 {dep_city} → 邻近到达 {alt_arr}")
             result = await search_train_tickets(dep_city, alt_arr, date)
             alt_trains = result.get("trains", [])
@@ -306,9 +309,9 @@ async def _calibrate_nearby_train_search(dep_city: str, arr_city: str, date: str
 
     # 策略3：尝试邻近出发 → 邻近到达（双向邻近）
     if not all_trains and dep_nearby and arr_nearby:
-        for alt_dep in dep_nearby[:2]:
+        for alt_dep in dep_nearby[:1]:
             found = False
-            for alt_arr in arr_nearby[:2]:
+            for alt_arr in arr_nearby[:1]:
                 if alt_dep == alt_arr:
                     continue
                 print(f"[CALIBRATE-TRAIN] 策略3：尝试双向邻近 {alt_dep} → {alt_arr}")
