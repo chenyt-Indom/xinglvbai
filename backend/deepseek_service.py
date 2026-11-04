@@ -79,6 +79,7 @@ async def call_deepseek(system_prompt: str, user_prompt: str, max_tokens: int = 
                             {"role": "user", "content": user_prompt},
                         ],
                         "temperature": 0.7, "max_tokens": max_tokens,
+                        "thinking": {"type": "disabled"},
                     },
                 )
                 resp.raise_for_status()
