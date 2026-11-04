@@ -962,6 +962,13 @@ def build_regenerate_prompt(dest: str, days: int, user_input: str, old_itinerary
 【天气预报】
 {weather_str}
 
+【去程/返程字段定义 - 务必严格区分，这是最容易出错的地方】
+- departure_transport = 去程：从出发城市前往目的地（{departure_city} → {dest}）
+- return_transport = 返程：从目的地返回出发城市（{dest} → {departure_city}）
+★ 用户说"去程/出发/前往/过去"时，只修改 departure_transport，return_transport 必须保持原样
+★ 用户说"返程/回程/回来/返回/回去"时，只修改 return_transport，departure_transport 必须保持原样
+★ 除非用户明确要求"往返都改"，否则绝不可同时改动两个字段
+
 请严格按照以下 JSON 格式输出（不要输出其他内容）：
 {{
   "destination": "{dest}",
@@ -993,4 +1000,5 @@ def build_regenerate_prompt(dest: str, days: int, user_input: str, old_itinerary
 6. 所有时间使用24小时制，禁止>23:59的时间（如26:00），跨天活动使用"次日XX:XX"格式
 7. 公共交通出行时，根据实际情况和用户偏好选择合适的交通工具
 8. 出发/返程时间不能太紧凑，必须留足缓冲。飞机需提前2小时到机场，火车需提前1小时到站
-9. 只输出JSON，不要markdown代码块"""
+9. 【去程/返程绝不可混淆】用户明确说"返程/回程/回来/回去"时，只能修改 return_transport 的班次与时间，departure_transport 必须原样保留；用户说"去程/出发/前往"时，只能修改 departure_transport，return_transport 必须原样保留。两者分别代表"去"和"回"，改错会让用户看到完全错误的车次！
+10. 只输出JSON，不要markdown代码块"""
