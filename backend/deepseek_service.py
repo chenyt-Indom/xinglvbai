@@ -73,7 +73,7 @@ async def call_deepseek(system_prompt: str, user_prompt: str, max_tokens: int = 
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": "deepseek-chat",
+                        "model": "deepseek-flash",
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
