@@ -789,7 +789,8 @@ def build_regenerate_prompt(dest: str, days: int, user_input: str, old_itinerary
                            weather_data: list, start_date: str = "", end_date: str = "",
                            is_self_drive: bool = False, departure_city: str = "",
                            transport_info: dict = None, transport_mode: str = "",
-                           mixed_transport: dict = None, travel_group: str = "") -> str:
+                           mixed_transport: dict = None, travel_group: str = "",
+                           old_dep: dict = None, old_ret: dict = None) -> str:
     """构建重新生成计划的提示词，重点参考用户输入的新需求"""
     transport_info = transport_info or {}  # 防止为None时报错
     old_summary = ""
@@ -800,6 +801,18 @@ def build_regenerate_prompt(dest: str, days: int, user_input: str, old_itinerary
             if s and s.get("spot"):
                 spots.append(f"{slot}: {s['spot']}")
         old_summary += f"Day{day['day']}({day.get('date','')}): {', '.join(spots)}\n"
+
+    # 原行程的往返交通原值（用户未提及的一方必须照抄，否则 AI 会把整个行程重写）
+    def _fmt_old_transport(t: dict) -> str:
+        if not t:
+            return "（无）"
+        return ("type={}, flight_number={}, departure_time={}, station={}, "
+                "arrival_time={}, duration={}, cost={}").format(
+            t.get("type", ""), t.get("flight_number", ""), t.get("departure_time", ""),
+            t.get("station", ""), t.get("arrival_time", ""), t.get("duration", ""),
+            t.get("cost", ""))
+    old_dep_str = _fmt_old_transport(old_dep)
+    old_ret_str = _fmt_old_transport(old_ret)
 
     weather_str = "\n".join([
         f"  {w['date']}: {w['dayweather']} {w['daytemp']}°C~{w['nighttemp']}°C"
@@ -965,8 +978,14 @@ def build_regenerate_prompt(dest: str, days: int, user_input: str, old_itinerary
 【去程/返程字段定义 - 务必严格区分，这是最容易出错的地方】
 - departure_transport = 去程：从出发城市前往目的地（{departure_city} → {dest}）
 - return_transport = 返程：从目的地返回出发城市（{dest} → {departure_city}）
-★ 用户说"去程/出发/前往/过去"时，只修改 departure_transport，return_transport 必须保持原样
-★ 用户说"返程/回程/回来/返回/回去"时，只修改 return_transport，departure_transport 必须保持原样
+
+【原行程的往返交通原值 —— 用户未提及的那一方必须一字不改地照抄！】
+- 原去程 departure_transport：{old_dep_str}
+- 原返程 return_transport：{old_ret_str}
+
+★ 用户说"返程/回程/回来/回去"时：只修改 return_transport；departure_transport 必须照抄上面"原去程"的全部字段，禁止重新选班次或改时间
+★ 用户说"去程/出发/前往/过去"时：只修改 departure_transport；return_transport 必须照抄上面"原返程"的全部字段
+★ 用户完全没提交通时：两个字段都必须原样照抄上面的原值
 ★ 除非用户明确要求"往返都改"，否则绝不可同时改动两个字段
 
 请严格按照以下 JSON 格式输出（不要输出其他内容）：

@@ -471,7 +471,9 @@ async def regenerate_trip(request: Request):
         # 构建regenerate prompt
         prompt = build_regenerate_prompt(dest, days, user_input, old_itinerary,
                                          weather_data, start_date, end_date,
-                                         is_self_drive, departure_city, transport_info, transport_mode, mixed_transport, travel_group)
+                                         is_self_drive, departure_city, transport_info, transport_mode, mixed_transport, travel_group,
+                                         old_dep=trip_data.get("departure_transport") or {},
+                                         old_ret=trip_data.get("return_transport") or {})
         # 调用DeepSeek
         try:
             raw = await call_deepseek("你是一个专业的旅行规划师，只输出JSON格式数据。", prompt, 6000)
