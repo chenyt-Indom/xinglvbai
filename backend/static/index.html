@@ -2853,16 +2853,30 @@ async function regeneratePlan() {
     if (data.success) {
       tripData = data.data;
       saveToHistory(data.data);
-      // 重新渲染详情页
-      renderTrip(tripData);
-      // 更新总览地图标记
-      updateOverviewMarkers();
+      // 重新渲染详情页（单独 try：渲染失败不要误报成"网络失败"）
+      try {
+        renderTrip(tripData);
+        updateOverviewMarkers();
+      } catch (renderErr) {
+        console.error('renderTrip 渲染失败:', renderErr);
+        alert('重新生成成功，但页面渲染出错：' + (renderErr && renderErr.message ? renderErr.message : renderErr) + '\n\n请按 F12 查看控制台');
+      }
       document.getElementById('newPlanInput').value = '';
+      // 明确告知新的去程/返程班次，并滚动到交通卡片，避免"看起来没变"
+      var dtNew = tripData.departure_transport || {};
+      var rtNew = tripData.return_transport || {};
+      var tcEl = document.getElementById('transportCard');
+      if (tcEl) {
+        try { tcEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { tcEl.scrollIntoView(); }
+      }
+      alert('✅ 重新生成成功\n\n去程：' + (dtNew.flight_number || '—') + '  ' + (dtNew.departure_time || '') + ' → ' + (dtNew.arrival_time || '') +
+            '\n返程：' + (rtNew.flight_number || '—') + '  ' + (rtNew.departure_time || '') + ' → ' + (rtNew.arrival_time || ''));
     } else {
       alert('重新生成失败：' + (data.error || '请重试'));
     }
   } catch (e) {
-    alert('重新生成失败，请检查网络');
+    console.error('regeneratePlan 请求异常:', e);
+    alert('重新生成失败：' + (e && e.message ? e.message : '请检查网络'));
   } finally {
     document.getElementById('regenerateLoadingOverlay').classList.remove('show');
   }
